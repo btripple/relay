@@ -69,6 +69,22 @@ export default function App() {
       })
     : null
 
+  const favorites = (settings && company)
+    ? new Set(settings.favorites?.[company.id] || [])
+    : new Set()
+
+  const handleToggleFavorite = async (propertyId) => {
+    const current = new Set(settings.favorites?.[company.id] || [])
+    if (current.has(propertyId)) current.delete(propertyId)
+    else current.add(propertyId)
+    const newSettings = {
+      ...settings,
+      favorites: { ...(settings.favorites || {}), [company.id]: [...current] }
+    }
+    await window.electronAPI.saveSettings(newSettings)
+    setSettings(newSettings)
+  }
+
   const handleLogin = async (clientId, clientSecret, orgIdOverride, companyIdOverride, tokens) => {
     let orgId = orgIdOverride || null
     if (!orgId) {
@@ -352,6 +368,8 @@ export default function App() {
               if (destProperty?.id === p.id) setDestProperty(null)
             }}
             exclude={destProperty ? [destProperty.id] : []}
+            favorites={favorites}
+            onToggleFavorite={handleToggleFavorite}
           />
         </div>
 
@@ -390,6 +408,8 @@ export default function App() {
               onCopy={handleCopy}
               onCompare={handleCompare}
               comparing={compareState?.status === 'loading'}
+              favorites={favorites}
+              onToggleFavorite={handleToggleFavorite}
             />
           ) : (
             <div className="panel-empty">

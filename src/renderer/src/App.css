@@ -345,9 +345,17 @@ body {
 /* ── Property list ────────────────────────────────── */
 .property-list { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
-.list-search { padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.list-search {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
 .list-search input, .asset-search {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -356,6 +364,40 @@ body {
   background: var(--bg);
 }
 .list-search input:focus, .asset-search:focus { border-color: var(--primary); background: var(--surface); }
+
+.btn-fav-filter {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.btn-fav-filter:hover { border-color: #e6a817; color: #e6a817; }
+.btn-fav-filter.active { background: #fff8e6; border-color: #e6a817; color: #e6a817; }
+
+.btn-star {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--border);
+  padding: 0;
+  line-height: 1;
+  transition: color .1s;
+  width: 16px;
+  text-align: center;
+}
+.btn-star:hover { color: #e6a817; }
+.btn-star.active { color: #e6a817; }
 
 .list-items { list-style: none; overflow-y: auto; flex: 1; padding: 4px 0; }
 .list-item {

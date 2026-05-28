@@ -5,7 +5,8 @@ export default function CopyPanel({
   client, companyId, sourcePropertyId,
   destProperty, onDestSelect,
   selectedRuleCount, selectedDECount,
-  onCopy, onCompare, comparing
+  onCopy, onCompare, comparing,
+  favorites, onToggleFavorite
 }) {
   const [overwrite, setOverwrite] = useState(false)
   const [copying, setCopying] = useState(false)
@@ -30,6 +31,8 @@ export default function CopyPanel({
           selected={destProperty}
           onSelect={onDestSelect}
           exclude={sourcePropertyId ? [sourcePropertyId] : []}
+          favorites={favorites}
+          onToggleFavorite={onToggleFavorite}
         />
       </div>
 
