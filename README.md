@@ -20,9 +20,7 @@ Relay is a desktop application for managing Adobe Launch (Tags) containers. It l
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 18 or later
-- An Adobe Developer Console project with:
-  - **OAuth Server-to-Server** credentials (Client ID + Client Secret)
-  - The **Experience Platform Launch** (or **Adobe Experience Platform**) API added to the project with appropriate product profiles
+- An Adobe Developer Console project configured per the instructions below
 
 ---
 
@@ -41,17 +39,32 @@ npm run build
 
 ---
 
-## Authentication
+## Configuration & Authentication
 
-On first launch, add your credentials using the **+** button on the sign-in screen. You will need:
+Relay authenticates against the Adobe Reactor API using **OAuth Server-to-Server** credentials. These are org-level service credentials — not tied to an individual user — so they need to be created once per Adobe org you want to work with.
+
+### 1. Create an Adobe Developer Console project
+
+1. Go to [Adobe Developer Console](https://developer.adobe.com/console/) and select your org from the top-right selector
+2. Create a new project (or use an existing one)
+3. Click **Add API** and select **Experience Platform Launch API**
+4. Choose **OAuth Server-to-Server** as the authentication type
+5. Select a product profile that has access to the Tags properties you need — typically an Admin or Developer profile in the Adobe Launch product
+6. Save the project
+
+### 2. Find your credentials
 
 | Field | Where to find it |
 |---|---|
-| **Client ID** | Adobe Developer Console → Your project → OAuth Server-to-Server |
-| **Client Secret** | Same location — click "Retrieve client secret" |
-| **Org ID** | Adobe Developer Console → top-right org selector, or Admin Console |
+| **Client ID** | Developer Console → Your project → OAuth Server-to-Server → Credentials details |
+| **Client Secret** | Same page — click "Retrieve client secret" |
+| **Org ID** | Developer Console → top-right org selector (format: `XXXX@AdobeOrg`), or Adobe Admin Console → Settings |
 
-You can also bulk-import multiple credential profiles from a JSON file:
+> **One set of credentials per org.** If you work across multiple Adobe organizations, create a Developer Console project in each org and add a separate credential profile in Relay for each.
+
+### 3. Add credentials to Relay
+
+On first launch, click the **+** button on the sign-in screen and enter your credentials. You can also bulk-import multiple profiles from a JSON file:
 
 ```json
 [
