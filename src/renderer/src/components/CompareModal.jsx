@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 
 export default function CompareModal({ status, result, error, sourceProperty, destProperty, onClose, onApply }) {
   const [selected, setSelected] = useState(new Set())
+  const [confirming, setConfirming] = useState(false)
 
   // Auto-select all missing items when result arrives
   useEffect(() => {
@@ -25,6 +26,7 @@ export default function CompareModal({ status, result, error, sourceProperty, de
   })
 
   const handleApply = () => {
+    setConfirming(false)
     const allRules = [...result.rules.missingFromDest, ...result.rules.matched]
     const allDEs   = [...result.dataElements.missingFromDest, ...result.dataElements.matched]
     onApply(
@@ -32,6 +34,14 @@ export default function CompareModal({ status, result, error, sourceProperty, de
       allDEs.filter(de => selected.has(de.id))
     )
   }
+
+  const confirmCounts = result ? (() => {
+    const adding     = result.rules.missingFromDest.filter(r  => selected.has(r.id)).length
+                     + result.dataElements.missingFromDest.filter(de => selected.has(de.id)).length
+    const overwriting = result.rules.matched.filter(r  => selected.has(r.id)).length
+                      + result.dataElements.matched.filter(de => selected.has(de.id)).length
+    return { adding, overwriting }
+  })() : null
 
   const totalMissing = result ? result.rules.missingFromDest.length + result.dataElements.missingFromDest.length : 0
   const totalExtra   = result ? result.rules.extraInDest.length    + result.dataElements.extraInDest.length    : 0
@@ -92,17 +102,39 @@ export default function CompareModal({ status, result, error, sourceProperty, de
 
         {status !== 'loading' && (
           <div className="modal-footer compare-footer">
-            <span className="compare-apply-count">
-              {selected.size > 0 ? `${selected.size} item${selected.size !== 1 ? 's' : ''} selected` : ''}
-            </span>
-            <div className="compare-footer-btns">
-              <button className="btn-ghost" onClick={onClose}>Close</button>
-              {status === 'done' && result && (
-                <button className="btn-primary" disabled={selected.size === 0} onClick={handleApply}>
-                  Apply {selected.size > 0 ? `${selected.size} change${selected.size !== 1 ? 's' : ''}` : 'changes'}
-                </button>
-              )}
-            </div>
+            {confirming && confirmCounts ? (
+              <div className="copy-confirm copy-confirm-wide">
+                <div className="copy-confirm-icon">⚠</div>
+                <div className="copy-confirm-body">
+                  <strong>Apply changes immediately?</strong>
+                  <p>
+                    {confirmCounts.adding > 0 && <>{confirmCounts.adding} item{confirmCounts.adding !== 1 ? 's' : ''} will be <strong>added</strong></>}
+                    {confirmCounts.adding > 0 && confirmCounts.overwriting > 0 && ', '}
+                    {confirmCounts.overwriting > 0 && <>{confirmCounts.overwriting} item{confirmCounts.overwriting !== 1 ? 's' : ''} will be <strong>overwritten</strong></>}
+                    {' '}in <strong>{destProperty?.attributes.name}</strong>.
+                    This cannot be undone from within Relay.
+                  </p>
+                </div>
+                <div className="copy-confirm-actions">
+                  <button className="btn-ghost btn-sm" onClick={() => setConfirming(false)}>Cancel</button>
+                  <button className="btn-danger btn-sm" onClick={handleApply}>Yes, apply now</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <span className="compare-apply-count">
+                  {selected.size > 0 ? `${selected.size} item${selected.size !== 1 ? 's' : ''} selected` : ''}
+                </span>
+                <div className="compare-footer-btns">
+                  <button className="btn-ghost" onClick={onClose}>Close</button>
+                  {status === 'done' && result && (
+                    <button className="btn-primary" disabled={selected.size === 0} onClick={() => setConfirming(true)}>
+                      Apply {selected.size > 0 ? `${selected.size} change${selected.size !== 1 ? 's' : ''}` : 'changes'}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -8,8 +8,9 @@ export default function AuthScreen({ settings, onLogin, onSettingsChange }) {
   const profiles = settings.profiles || []
   const [view, setView] = useState(profiles.length > 0 ? 'list' : 'form')
   const [editProfile, setEditProfile] = useState(null)
-  const [connectingId, setConnectingId] = useState(null)
-  const [connectError, setConnectError] = useState(null)
+  const [connectingId, setConnectingId]     = useState(null)
+  const [connectError, setConnectError]     = useState(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
 
   const saveProfiles = async (updated) => {
     const next = { ...settings, profiles: updated }
@@ -24,7 +25,7 @@ export default function AuthScreen({ settings, onLogin, onSettingsChange }) {
         clientId: profile.clientId,
         clientSecret: profile.clientSecret
       })
-      onLogin(profile.clientId, profile.clientSecret, profile.orgId || null, profile.companyId || null, tokens)
+      onLogin(profile.clientId, profile.clientSecret, profile.orgId || null, profile.companyId || null, tokens, profile.xdmTenantId || null, profile.aiApiKey || null, profile.analyticsRsid || null)
     } catch (err) {
       setConnectError(err.message)
     } finally {
@@ -45,6 +46,7 @@ export default function AuthScreen({ settings, onLogin, onSettingsChange }) {
   }
 
   const handleDelete = async (id) => {
+    setConfirmDeleteId(null)
     await saveProfiles(profiles.filter(p => p.id !== id))
     if (profiles.length === 1) setView('form')
   }
@@ -134,21 +136,37 @@ export default function AuthScreen({ settings, onLogin, onSettingsChange }) {
                 <div className="profile-card-org">{profile.orgId || <em className="muted">no org ID</em>}</div>
               </div>
               <div className="profile-card-btns">
-                <button
-                  className="btn-ghost btn-sm"
-                  onClick={() => { setEditProfile(profile); setView('form') }}
-                >Edit</button>
-                <button
-                  className="btn-ghost btn-sm btn-danger-ghost"
-                  onClick={() => handleDelete(profile.id)}
-                >Delete</button>
-                <button
-                  className="btn-primary btn-sm"
-                  disabled={connectingId === profile.id}
-                  onClick={() => handleConnect(profile)}
-                >
-                  {connectingId === profile.id ? 'Connecting…' : 'Connect'}
-                </button>
+                {confirmDeleteId === profile.id ? (
+                  <>
+                    <span className="profile-delete-confirm-label">Delete "{profile.name}"?</span>
+                    <button
+                      className="btn-danger btn-sm"
+                      onClick={() => handleDelete(profile.id)}
+                    >Yes, delete</button>
+                    <button
+                      className="btn-ghost btn-sm"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >Cancel</button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="btn-ghost btn-sm"
+                      onClick={() => { setEditProfile(profile); setView('form') }}
+                    >Edit</button>
+                    <button
+                      className="btn-ghost btn-sm btn-danger-ghost"
+                      onClick={() => setConfirmDeleteId(profile.id)}
+                    >Delete</button>
+                    <button
+                      className="btn-primary btn-sm"
+                      disabled={connectingId === profile.id}
+                      onClick={() => handleConnect(profile)}
+                    >
+                      {connectingId === profile.id ? 'Connecting…' : 'Connect'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -167,12 +185,15 @@ export default function AuthScreen({ settings, onLogin, onSettingsChange }) {
 // ── Profile add / edit form ───────────────────────────────────────────────────
 
 function ProfileForm({ profile, hasProfiles, onSave, onCancel }) {
-  const [name, setName]             = useState(profile?.name || '')
-  const [clientId, setClientId]     = useState(profile?.clientId || '')
-  const [clientSecret, setSecret]   = useState(profile?.clientSecret || '')
-  const [orgId, setOrgId]           = useState(profile?.orgId || '')
-  const [companyId, setCompanyId]   = useState(profile?.companyId || '')
-  const [error, setError]           = useState(null)
+  const [name, setName]               = useState(profile?.name || '')
+  const [clientId, setClientId]       = useState(profile?.clientId || '')
+  const [clientSecret, setSecret]     = useState(profile?.clientSecret || '')
+  const [orgId, setOrgId]             = useState(profile?.orgId || '')
+  const [companyId, setCompanyId]     = useState(profile?.companyId || '')
+  const [xdmTenantId, setTenantId]   = useState(profile?.xdmTenantId || '')
+  const [analyticsRsid, setRsid]     = useState(profile?.analyticsRsid || '')
+  const [aiApiKey, setAiApiKey]       = useState(profile?.aiApiKey || '')
+  const [error, setError]             = useState(null)
 
   const handleSave = () => {
     if (!name.trim())         { setError('Please enter a profile name'); return }
@@ -186,7 +207,10 @@ function ProfileForm({ profile, hasProfiles, onSave, onCancel }) {
       clientId: clientId.trim(),
       clientSecret: clientSecret.trim(),
       orgId: orgId.trim(),
-      companyId: companyId.trim()
+      companyId: companyId.trim(),
+      xdmTenantId: xdmTenantId.trim(),
+      analyticsRsid: analyticsRsid.trim(),
+      aiApiKey: aiApiKey.trim(),
     })
   }
 
@@ -217,13 +241,59 @@ function ProfileForm({ profile, hasProfiles, onSave, onCancel }) {
           </label>
           <input id="pf-org" type="text" value={orgId} onChange={e => setOrgId(e.target.value)} placeholder="XXXXXXXXXXXXXXXXXXXXXXXXX@AdobeOrg" />
         </div>
-        <div className="field">
-          <label htmlFor="pf-co">
-            Company ID
-            <span className="field-hint"> — optional, looks like <code>CO1a2b3c…</code></span>
-          </label>
-          <input id="pf-co" type="text" value={companyId} onChange={e => setCompanyId(e.target.value)} placeholder="COxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" onKeyDown={e => e.key === 'Enter' && handleSave()} />
-        </div>
+        <details className="form-advanced" open={!!(companyId || xdmTenantId || analyticsRsid || aiApiKey)}>
+          <summary className="form-advanced-summary">Advanced / Web SDK Migration <span className="field-hint">(optional)</span></summary>
+          <div className="form-advanced-body">
+            <div className="field">
+              <label htmlFor="pf-co">
+                Company ID
+                <span className="field-hint"> — looks like <code>CO1a2b3c…</code></span>
+              </label>
+              <input id="pf-co" type="text" value={companyId} onChange={e => setCompanyId(e.target.value)} placeholder="COxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            </div>
+            <div className="field">
+              <label htmlFor="pf-tenant">XDM Tenant ID</label>
+              <input
+                id="pf-tenant"
+                type="text"
+                value={xdmTenantId}
+                onChange={e => setTenantId(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                placeholder="yourTenantId"
+              />
+              <span className="field-help">
+                Custom namespace prefix in your AEP schema (without the underscore), e.g. <code>acme</code> for <code>_acme.field</code>.
+              </span>
+            </div>
+            <div className="field">
+              <label htmlFor="pf-rsid">Analytics Report Suite ID</label>
+              <input
+                id="pf-rsid"
+                type="text"
+                value={analyticsRsid}
+                onChange={e => setRsid(e.target.value.trim())}
+                placeholder="my_report_suite_prod"
+              />
+              <span className="field-help">
+                Used to fetch configured eVar/prop/event names from Adobe Analytics, giving the AI richer context for XDM path suggestions.
+              </span>
+            </div>
+            <div className="field">
+              <label htmlFor="pf-ai-key">Gemini API Key</label>
+              <input
+                id="pf-ai-key"
+                type="password"
+                value={aiApiKey}
+                onChange={e => setAiApiKey(e.target.value.trim())}
+                placeholder="AIza…"
+                onKeyDown={e => e.key === 'Enter' && handleSave()}
+                autoComplete="off"
+              />
+              <span className="field-help">
+                Google AI Studio key (<code>aistudio.google.com</code>). Stored locally, sent only to Gemini.
+              </span>
+            </div>
+          </div>
+        </details>
 
         {error && <div className="auth-error">{error}</div>}
 

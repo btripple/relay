@@ -8,8 +8,9 @@ export default function CopyPanel({
   onCopy, onCompare, comparing,
   favorites, onToggleFavorite
 }) {
-  const [overwrite, setOverwrite] = useState(false)
+  const [mode, setMode] = useState('skip')
   const [copying, setCopying] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   const selectionCount = selectedRuleCount + selectedDECount
   const busy = copying || comparing
@@ -17,9 +18,16 @@ export default function CopyPanel({
   const canCompare = destProperty && !busy
 
   const handleCopy = async () => {
+    setConfirming(false)
     setCopying(true)
-    try { await onCopy(overwrite) }
+    try { await onCopy(mode) }
     finally { setCopying(false) }
+  }
+
+  const MODE_LABELS = {
+    skip:      'skip existing rules',
+    overwrite: 'overwrite existing rules',
+    merge:     'merge Adobe actions into existing rules',
   }
 
   return (
@@ -53,14 +61,25 @@ export default function CopyPanel({
           )}
         </div>
 
-        <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={overwrite}
-            onChange={e => setOverwrite(e.target.checked)}
-          />
-          Overwrite existing assets
-        </label>
+        <div className="copy-mode-group">
+          <span className="copy-mode-label">If rule exists in destination:</span>
+          {[
+            { value: 'skip',      label: 'Skip' },
+            { value: 'overwrite', label: 'Overwrite' },
+            { value: 'merge',     label: 'Merge Adobe actions' },
+          ].map(opt => (
+            <label key={opt.value} className={`copy-mode-option ${mode === opt.value ? 'active' : ''}`}>
+              <input
+                type="radio"
+                name="copy-mode"
+                value={opt.value}
+                checked={mode === opt.value}
+                onChange={() => setMode(opt.value)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
 
         {!destProperty && (
           <p className="copy-hint muted">Select a destination property above</p>
@@ -74,17 +93,38 @@ export default function CopyPanel({
           {comparing ? 'Comparing…' : 'Compare properties'}
         </button>
 
-        <button
-          className="btn-copy"
-          disabled={!canCopy}
-          onClick={handleCopy}
-        >
-          {copying
-            ? 'Copying…'
-            : destProperty
-              ? `Copy to "${destProperty.attributes.name}"`
-              : 'Copy selected assets'}
-        </button>
+        {confirming ? (
+          <div className="copy-confirm">
+            <div className="copy-confirm-icon">⚠</div>
+            <div className="copy-confirm-body">
+              <strong>Apply changes immediately?</strong>
+              <p>
+                {selectedRuleCount > 0 && <>{selectedRuleCount} rule{selectedRuleCount !== 1 ? 's' : ''}</>}
+                {selectedRuleCount > 0 && selectedDECount > 0 && ' and '}
+                {selectedDECount > 0 && <>{selectedDECount} data element{selectedDECount !== 1 ? 's' : ''}</>}
+                {' '}will be copied to <strong>{destProperty?.attributes.name}</strong>.
+                Conflicting rules will be set to <strong>{MODE_LABELS[mode]}</strong>.
+                This cannot be undone from within Relay.
+              </p>
+            </div>
+            <div className="copy-confirm-actions">
+              <button className="btn-ghost btn-sm" onClick={() => setConfirming(false)}>Cancel</button>
+              <button className="btn-danger btn-sm" onClick={handleCopy}>Yes, copy now</button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="btn-copy"
+            disabled={!canCopy}
+            onClick={() => setConfirming(true)}
+          >
+            {copying
+              ? 'Copying…'
+              : destProperty
+                ? `Copy to "${destProperty.attributes.name}"`
+                : 'Copy selected assets'}
+          </button>
+        )}
       </div>
     </div>
   )

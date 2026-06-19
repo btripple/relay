@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import ReactorClient from './api/reactor'
 import AuthScreen from './components/AuthScreen'
 import PropertyList from './components/PropertyList'
@@ -10,6 +11,7 @@ import AuditModal from './components/AuditModal'
 import LibraryModal from './components/LibraryModal'
 import ImportModal from './components/ImportModal'
 import { buildAuditData } from './utils/auditExport'
+import { WEB_SDK_MIGRATION_ENABLED, MigrationWizard } from './features/webSdkMigration'
 
 export default function App() {
   const [settings, setSettings] = useState(null)
@@ -33,6 +35,7 @@ export default function App() {
   const [copyState, setCopyState] = useState(null)
   const [compareState, setCompareState] = useState(null)
   const [auditState, setAuditState] = useState(null)
+  const [migrationState, setMigrationState] = useState(null)
   const [libraryState, setLibraryState] = useState(null)
   const [exportState, setExportState] = useState(null)
   const [importPreview, setImportPreview] = useState(null)
@@ -85,7 +88,7 @@ export default function App() {
     setSettings(newSettings)
   }
 
-  const handleLogin = async (clientId, clientSecret, orgIdOverride, companyIdOverride, tokens) => {
+  const handleLogin = async (clientId, clientSecret, orgIdOverride, companyIdOverride, tokens, xdmTenantId, aiApiKey, analyticsRsid) => {
     let orgId = orgIdOverride || null
     if (!orgId) {
       try {
@@ -97,7 +100,7 @@ export default function App() {
     const newSettings = { ...settings, clientId, clientSecret, orgId, companyId: companyIdOverride || null }
     await window.electronAPI.saveSettings(newSettings)
     setSettings(newSettings)
-    setAuth({ accessToken: tokens.access_token, clientId, orgId, companyId: companyIdOverride || null })
+    setAuth({ accessToken: tokens.access_token, clientId, orgId, companyId: companyIdOverride || null, xdmTenantId: xdmTenantId || null, aiApiKey: aiApiKey || null, analyticsRsid: analyticsRsid || null })
   }
 
   // Load companies after login
@@ -148,17 +151,71 @@ export default function App() {
       .finally(() => setAssetsLoading(false))
   }, [sourceProperty?.id])
 
+  const auditAbortRef     = useRef(null)
+  const migrationAbortRef = useRef(null)
+  const transferBtnRef    = useRef(null)
+
+  const [showTransferMenu, setShowTransferMenu] = useState(false)
+  const [transferMenuPos, setTransferMenuPos]   = useState(null)
+
+  const openTransferMenu = () => {
+    const r = transferBtnRef.current?.getBoundingClientRect()
+    if (r) setTransferMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    setShowTransferMenu(true)
+  }
+
   const handleAudit = async () => {
+    const abort = new AbortController()
+    auditAbortRef.current = abort
     setAuditState({ status: 'loading', progress: 'Starting…', progressPct: 0 })
     try {
-      const raw = await client.auditProperty(sourceProperty.id, (msg, pct) => {
-        setAuditState({ status: 'loading', progress: msg, progressPct: pct })
-      })
+      const raw = await client.auditProperty(
+        sourceProperty.id,
+        (msg, pct) => {
+          if (!abort.signal.aborted)
+            setAuditState({ status: 'loading', progress: msg, progressPct: pct })
+        },
+        abort.signal
+      )
       const auditData = buildAuditData(raw, sourceProperty.attributes.name)
-      setAuditState({ status: 'done', auditData })
+      const warnings = raw.timedOut?.length
+        ? [`${raw.timedOut.length} rule(s) timed out and may show incomplete trigger data: ${raw.timedOut.join(', ')}`]
+        : []
+      setAuditState({ status: 'done', auditData, warnings })
     } catch (err) {
+      if (err.name === 'AbortError') return  // user cancelled — state already cleared
       setAuditState({ status: 'error', error: err.message })
     }
+  }
+
+  const handleCancelAudit = () => {
+    auditAbortRef.current?.abort()
+    setAuditState(null)
+  }
+
+  const handleMigration = async () => {
+    const abort = new AbortController()
+    migrationAbortRef.current = abort
+    setMigrationState({ status: 'loading', progress: 'Starting…', progressPct: 0 })
+    try {
+      const rawData = await client.auditProperty(
+        sourceProperty.id,
+        (msg, pct) => {
+          if (!abort.signal.aborted)
+            setMigrationState({ status: 'loading', progress: msg, progressPct: pct })
+        },
+        abort.signal
+      )
+      setMigrationState({ status: 'done', rawData })
+    } catch (err) {
+      if (err.name === 'AbortError') return
+      setMigrationState({ status: 'error', error: err.message })
+    }
+  }
+
+  const handleCancelMigration = () => {
+    migrationAbortRef.current?.abort()
+    setMigrationState(null)
   }
 
   const handleExport = async () => {
@@ -192,7 +249,7 @@ export default function App() {
     }
   }
 
-  const handleImportConfirm = async (overwrite) => {
+  const handleImportConfirm = async ({ mode, selectedRuleIds, selectedDEIds, selectedExtIds }) => {
     const { exportData } = importPreview
     setImportPreview(null)
     setCopyState({ status: 'running', log: [] })
@@ -200,7 +257,7 @@ export default function App() {
       const { log, destRuleIds, destDEIds } = await client.importAssets(
         sourceProperty.id,
         exportData,
-        { overwrite },
+        { overwrite: mode === 'overwrite', selectedRuleIds, selectedDEIds, selectedExtIds },
         (log) => setCopyState({ status: 'running', log })
       )
       setCopyState({ status: 'done', log, destRuleIds, destDEIds })
@@ -228,7 +285,7 @@ export default function App() {
         destProperty.id,
         rulesToCopy,
         desToCopy,
-        { overwrite: true },
+        { mode: 'overwrite' },
         (log) => setCopyState({ status: 'running', log })
       )
       setCopyState({ status: 'done', log, destRuleIds, destDEIds })
@@ -237,7 +294,7 @@ export default function App() {
     }
   }
 
-  const handleCopy = async (overwrite) => {
+  const handleCopy = async (mode) => {
     const rulesToCopy = rules.filter(r => selectedRules.has(r.id))
     const desToCopy = dataElements.filter(de => selectedDEs.has(de.id))
     setCopyState({ status: 'running', log: [] })
@@ -247,7 +304,7 @@ export default function App() {
         destProperty.id,
         rulesToCopy,
         desToCopy,
-        { overwrite },
+        { mode },
         (log) => setCopyState({ status: 'running', log })
       )
       setCopyState({ status: 'done', log, destRuleIds, destDEIds })
@@ -293,7 +350,7 @@ export default function App() {
             <span className="app-brand-name">Relay</span>
             <span className="app-brand-sub">a container utility for Adobe Tags</span>
           </div>
-          <button className="btn-ghost" onClick={() => setAuth(null)}>Sign out</button>
+          <button className="btn-ghost" onClick={() => setAuth(null)}>Switch</button>
         </header>
         <div className="company-list">
           <h2>Select an organization</h2>
@@ -325,38 +382,38 @@ export default function App() {
             </select>
           )}
           {companies.length === 1 && <span className="org-name">{company.attributes.name}</span>}
-          <button className="btn-ghost" onClick={() => setAuth(null)}>Sign out</button>
+          <button className="btn-ghost" onClick={() => setAuth(null)}>Switch</button>
         </div>
       </header>
 
       <div className="panels">
         <div className="panel panel-source">
-          <div className="panel-header">
-            <span className="panel-label">Source</span>
-            {sourceProperty && <span className="panel-title">{sourceProperty.attributes.name}</span>}
+          <div className="panel-header panel-source-header">
+            <div className="panel-source-top">
+              <span className="panel-label">Source</span>
+              {sourceProperty && <span className="panel-title">{sourceProperty.attributes.name}</span>}
+            </div>
             {sourceProperty && (
-              <button className="btn-audit" onClick={handleAudit} title="Audit this property">
-                Audit
-              </button>
-            )}
-            {sourceProperty && (
-              <button
-                className="btn-export"
-                onClick={handleExport}
-                disabled={!!exportState}
-                title="Export this property to a file"
-              >
-                {exportState?.status === 'running' ? 'Exporting…' : 'Export'}
-              </button>
-            )}
-            {sourceProperty && (
-              <button
-                className="btn-export"
-                onClick={handleImportFile}
-                title="Import a previously exported container into this property"
-              >
-                Import
-              </button>
+              <div className="panel-header-btns">
+                <button className="btn-hdr btn-hdr-primary" onClick={handleAudit} title="Audit this property">
+                  Audit
+                </button>
+                {WEB_SDK_MIGRATION_ENABLED && (
+                  <button className="btn-hdr btn-hdr-amber" onClick={handleMigration} title="Web SDK Migration (BETA — pre-production)">
+                    Migrate<sup className="btn-hdr-beta">β</sup>
+                  </button>
+                )}
+                <span className="btn-hdr-divider" />
+                <div ref={transferBtnRef}>
+                  <button
+                    className={`btn-hdr btn-hdr-ghost${showTransferMenu ? ' active' : ''}`}
+                    onClick={openTransferMenu}
+                    title="Export or import a container file"
+                  >
+                    ⇅ Container file
+                  </button>
+                </div>
+              </div>
             )}
           </div>
           <PropertyList
@@ -455,15 +512,56 @@ export default function App() {
         />
       )}
 
+      {migrationState?.status === 'loading' && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 420 }}>
+            <div className="modal-header"><h2>Web SDK Migration <span className="mig-beta-badge">BETA</span></h2></div>
+            <div className="audit-loading">
+              <div className="audit-progress-bar">
+                <div className="audit-progress-fill" style={{ width: `${migrationState.progressPct}%` }} />
+              </div>
+              <div className="audit-progress-label">{migrationState.progress}</div>
+              <button className="btn-ghost audit-cancel-btn" onClick={handleCancelMigration}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {migrationState?.status === 'error' && (
+        <div className="modal-overlay" onClick={handleCancelMigration}>
+          <div className="modal" style={{ maxWidth: 380 }}>
+            <div className="modal-header"><h2>Migration failed</h2></div>
+            <div style={{ padding: '24px' }}><div className="auth-error">{migrationState.error}</div></div>
+            <div className="modal-footer">
+              <button className="btn-primary" onClick={() => setMigrationState(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {migrationState?.status === 'done' && (
+        <MigrationWizard
+          rawData={migrationState.rawData}
+          propertyName={sourceProperty?.attributes.name}
+          initialTenantId={auth?.xdmTenantId || ''}
+          aiApiKey={auth?.aiApiKey || ''}
+          analyticsRsid={auth?.analyticsRsid || ''}
+          analyticsAuth={auth ? { accessToken: auth.accessToken, clientId: auth.clientId, orgId: auth.orgId } : null}
+          onClose={() => setMigrationState(null)}
+        />
+      )}
+
       {auditState && (
         <AuditModal
           status={auditState.status}
           progress={auditState.progress}
           progressPct={auditState.progressPct}
           auditData={auditState.auditData}
+          warnings={auditState.warnings}
           propertyName={sourceProperty?.attributes.name}
           error={auditState.error}
           onClose={() => setAuditState(null)}
+          onCancel={handleCancelAudit}
         />
       )}
 
@@ -471,6 +569,7 @@ export default function App() {
         <ImportModal
           exportData={importPreview.exportData}
           destProperty={sourceProperty}
+          client={client}
           onConfirm={handleImportConfirm}
           onClose={() => setImportPreview(null)}
         />
@@ -504,6 +603,36 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showTransferMenu && transferMenuPos && createPortal(
+        <>
+          <div className="transfer-backdrop" onClick={() => setShowTransferMenu(false)} />
+          <div className="transfer-dropdown" style={{ top: transferMenuPos.top, right: transferMenuPos.right }}>
+            <button
+              className="transfer-dropdown-item"
+              onClick={() => { setShowTransferMenu(false); handleExport() }}
+              disabled={!!exportState}
+            >
+              <span className="transfer-item-icon">↓</span>
+              <div>
+                <div className="transfer-item-label">Export to file</div>
+                <div className="transfer-item-desc">Save this property as a Relay export file</div>
+              </div>
+            </button>
+            <button
+              className="transfer-dropdown-item"
+              onClick={() => { setShowTransferMenu(false); handleImportFile() }}
+            >
+              <span className="transfer-item-icon">↑</span>
+              <div>
+                <div className="transfer-item-label">Import from file</div>
+                <div className="transfer-item-desc">Add assets to this property from a Relay export file</div>
+              </div>
+            </button>
+          </div>
+        </>,
+        document.body
       )}
     </div>
   )

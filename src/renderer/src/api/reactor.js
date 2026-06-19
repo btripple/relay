@@ -1,4 +1,15 @@
 const BASE = 'https://reactor.adobe.io'
+const RULE_FETCH_TIMEOUT_MS = 45_000  // per-rule component fetch; raise if your property is huge
+
+function withTimeout(promise, ms) {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Request timed out after ${ms / 1000}s`)), ms)
+    })
+  ]).finally(() => clearTimeout(timer))
+}
 
 export default class ReactorClient {
   constructor({ accessToken, clientId, orgId = null }) {
@@ -97,33 +108,54 @@ export default class ReactorClient {
   getDataElements(propertyId) { return this._fetchAll(`/properties/${propertyId}/data_elements`) }
   getRuleComponents(ruleId) { return this._fetchAll(`/rules/${ruleId}/rule_components`) }
 
-  async auditProperty(propertyId, onProgress) {
+  async auditProperty(propertyId, onProgress, signal) {
+    const checkAbort = () => {
+      if (signal?.aborted) throw Object.assign(new Error('Audit cancelled'), { name: 'AbortError' })
+    }
+
     onProgress?.('Fetching extensions…', 5)
     const extensions = await this.fetchExtensionsWithPackages(propertyId)
+    checkAbort()
 
     onProgress?.('Fetching rules…', 15)
     const rules = await this.getRules(propertyId)
+    checkAbort()
 
     onProgress?.('Fetching data elements…', 25)
     const dataElements = await this.getDataElements(propertyId)
+    checkAbort()
 
-    // Fetch rule components concurrently (8 at a time)
+    // Fetch rule components concurrently (8 at a time) with per-rule timeout
     const ruleComponents = {}
     let done = 0
+    const timedOut = []
     const queue = [...rules]
     const workers = Array.from({ length: Math.min(8, queue.length || 1) }, async () => {
       while (queue.length > 0) {
+        if (signal?.aborted) break
         const rule = queue.shift()
         if (!rule) break
-        ruleComponents[rule.id] = await this.getRuleComponents(rule.id)
+        try {
+          ruleComponents[rule.id] = await withTimeout(
+            this.getRuleComponents(rule.id),
+            RULE_FETCH_TIMEOUT_MS
+          )
+        } catch (err) {
+          if (signal?.aborted) break
+          // Timeout: record but continue so the rest of the audit completes
+          ruleComponents[rule.id] = []
+          timedOut.push(rule.attributes.name)
+        }
         done++
         const pct = 30 + Math.round((done / rules.length) * 65)
-        onProgress?.(`Fetching rule components (${done}/${rules.length})…`, pct)
+        const suffix = timedOut.length ? ` (${timedOut.length} timed out)` : ''
+        onProgress?.(`Fetching rule components (${done}/${rules.length})…${suffix}`, pct)
       }
     })
     await Promise.all(workers)
+    checkAbort()
 
-    return { extensions, rules, dataElements, ruleComponents }
+    return { extensions, rules, dataElements, ruleComponents, timedOut }
   }
 
   async createRule(propertyId, name, enabled) {
@@ -196,6 +228,19 @@ export default class ReactorClient {
     return r.data
   }
 
+  async updateExtension(extId, srcExt) {
+    const settings = srcExt.attributes?.settings
+    if (!settings) return null   // null or empty — nothing to apply
+    const r = await this._request('PATCH', `/extensions/${extId}`, {
+      data: {
+        type: 'extensions',
+        id: extId,
+        attributes: { settings },
+      }
+    })
+    return r.data
+  }
+
   async compareAssets(srcPropId, destPropId) {
     const [srcRules, destRules, srcDEs, destDEs] = await Promise.all([
       this.getRules(srcPropId),
@@ -219,7 +264,22 @@ export default class ReactorClient {
     }
   }
 
-  async copyAssets(srcPropId, destPropId, rules, dataElements, { overwrite }, onProgress) {
+  _isAdobeAction(comp) {
+    const ddi = comp.attributes.delegate_descriptor_id || ''
+    return ddi.startsWith('adobe-analytics::actions::') || ddi.startsWith('adobe-alloy::actions::')
+  }
+
+  async _mergeAdobeActions(destPropId, destRuleId, srcComponents, extMap) {
+    const existingComps = await this.getRuleComponents(destRuleId)
+    for (const c of existingComps.filter(c => this._isAdobeAction(c))) {
+      await this.deleteRuleComponent(c.id)
+    }
+    for (const c of srcComponents.filter(c => this._isAdobeAction(c))) {
+      await this.createRuleComponent(destPropId, destRuleId, c, extMap)
+    }
+  }
+
+  async copyAssets(srcPropId, destPropId, rules, dataElements, { mode = 'skip' }, onProgress) {
     const log = []
     const destRuleIds = []
     const destDEIds = []
@@ -236,7 +296,7 @@ export default class ReactorClient {
       emit('warning', `Extensions not in destination (assets using these may fail): ${[...new Set(unmapped)].join(', ')}`)
     }
 
-    // Data elements
+    // Data elements — merge mode behaves like overwrite for DEs
     if (dataElements.length) {
       const destDEs = await this.getDataElements(destPropId)
       const destByName = Object.fromEntries(destDEs.map(d => [d.attributes.name, d]))
@@ -245,7 +305,7 @@ export default class ReactorClient {
         const name = de.attributes.name
         try {
           const existing = destByName[name]
-          if (existing && overwrite) {
+          if (existing && mode !== 'skip') {
             await this.updateDataElement(existing.id, de, extMap)
             destDEIds.push(existing.id)
             emit('success', `Updated data element: ${name}`)
@@ -273,13 +333,18 @@ export default class ReactorClient {
           const components = await this.getRuleComponents(rule.id)
           const existing = destByName[name]
 
-          if (existing && overwrite) {
+          if (existing && mode === 'overwrite') {
             await this.updateRule(existing.id, { name, enabled: rule.attributes.enabled })
             const existingComps = await this.getRuleComponents(existing.id)
             for (const c of existingComps) await this.deleteRuleComponent(c.id)
             for (const c of components) await this.createRuleComponent(destPropId, existing.id, c, extMap)
             destRuleIds.push(existing.id)
             emit('success', `Updated rule: ${name}`)
+          } else if (existing && mode === 'merge') {
+            await this._mergeAdobeActions(destPropId, existing.id, components, extMap)
+            destRuleIds.push(existing.id)
+            const mergedCount = components.filter(c => this._isAdobeAction(c)).length
+            emit('success', `Merged rule: ${name} (${mergedCount} Adobe action${mergedCount !== 1 ? 's' : ''} replaced)`)
           } else if (existing) {
             emit('skipped', `Skipped (exists): ${name}`)
           } else {
@@ -324,7 +389,7 @@ export default class ReactorClient {
     return { version: 1, exportedAt: new Date().toISOString(), extensions, rules, dataElements }
   }
 
-  async importAssets(destPropId, exportData, { overwrite = false }, onProgress) {
+  async importAssets(destPropId, exportData, { overwrite = false, selectedRuleIds = null, selectedDEIds = null, selectedExtIds = null }, onProgress) {
     const log = []
     const destRuleIds = []
     const destDEIds = []
@@ -339,13 +404,36 @@ export default class ReactorClient {
       emit('warning', `Extensions not in destination (assets using these may fail): ${[...new Set(unmapped)].join(', ')}`)
     }
 
-    const { dataElements = [], rules = [] } = exportData
+    if (selectedExtIds && selectedExtIds.size > 0) {
+      for (const srcExt of srcExts) {
+        if (!selectedExtIds.has(srcExt.id)) continue
+        const destExtId = extMap[srcExt.id]
+        if (!destExtId) {
+          emit('skipped', `Extension not in destination (settings skipped): ${srcExt._packageName || srcExt.id}`)
+          continue
+        }
+        try {
+          const result = await this.updateExtension(destExtId, srcExt)
+          if (result) {
+            emit('success', `Updated extension settings: ${srcExt._packageName || srcExt.id}`)
+          } else {
+            emit('skipped', `No settings configured in source: ${srcExt._packageName || srcExt.id}`)
+          }
+        } catch (err) {
+          emit('warning', `Could not update extension settings for ${srcExt._packageName || srcExt.id}: ${err.message}`)
+        }
+      }
+    }
 
-    if (dataElements.length) {
+    const { dataElements = [], rules = [] } = exportData
+    const desToImport = selectedDEIds ? dataElements.filter(de => selectedDEIds.has(de.id)) : dataElements
+    const rulesToImport = selectedRuleIds ? rules.filter(r => selectedRuleIds.has(r.id)) : rules
+
+    if (desToImport.length) {
       const destDEs = await this.getDataElements(destPropId)
       const destByName = Object.fromEntries(destDEs.map(d => [d.attributes.name, d]))
 
-      for (const de of dataElements) {
+      for (const de of desToImport) {
         const name = de.attributes.name
         try {
           const existing = destByName[name]
@@ -366,11 +454,11 @@ export default class ReactorClient {
       }
     }
 
-    if (rules.length) {
+    if (rulesToImport.length) {
       const destRules = await this.getRules(destPropId)
       const destByName = Object.fromEntries(destRules.map(r => [r.attributes.name, r]))
 
-      for (const rule of rules) {
+      for (const rule of rulesToImport) {
         const name = rule.attributes.name
         const components = rule._components || []
         try {

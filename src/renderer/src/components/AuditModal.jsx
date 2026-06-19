@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { exportAuditToExcel } from '../utils/auditExport'
 
-export default function AuditModal({ status, progress, progressPct, auditData, propertyName, error, onClose }) {
+export default function AuditModal({ status, progress, progressPct, auditData, warnings, propertyName, error, onClose, onCancel }) {
   const [tab, setTab] = useState('discovery')
   const [exporting, setExporting] = useState(false)
 
   const handleExport = async () => {
     setExporting(true)
     try {
-      const base64 = exportAuditToExcel(auditData, propertyName)
+      const base64 = exportAuditToExcel(auditData)
       const safeName = propertyName.replace(/[^\w\s-]/g, '').trim()
       await window.electronAPI.saveFile(base64, `${safeName}_audit.xlsx`)
     } finally {
@@ -37,11 +37,18 @@ export default function AuditModal({ status, progress, progressPct, auditData, p
               <div className="audit-progress-fill" style={{ width: `${progressPct}%` }} />
             </div>
             <div className="audit-progress-label">{progress}</div>
+            <button className="btn-ghost audit-cancel-btn" onClick={onCancel}>Cancel</button>
           </div>
         )}
 
         {status === 'error' && (
           <div className="compare-loading compare-error">{error}</div>
+        )}
+
+        {status === 'done' && warnings?.length > 0 && (
+          <div className="audit-warnings">
+            {warnings.map((w, i) => <div key={i} className="audit-warning-item">⚠ {w}</div>)}
+          </div>
         )}
 
         {status === 'done' && auditData && (
@@ -67,14 +74,18 @@ export default function AuditModal({ status, progress, progressPct, auditData, p
 
             <div className="audit-body">
               {tab === 'discovery' && <DiscoveryTab auditData={auditData} />}
-              {tab === 'rules'     && <SheetTab rows={auditData.rulesInventory} frozenCols={2} />}
+              {tab === 'rules'     && <SheetTab rows={auditData.rulesInventory} frozenCols={0} searchable />}
               {tab === 'des'       && <DEsTab rows={auditData.orphanedDEs} />}
-              {tab === 'names'     && <SheetTab rows={auditData.nameAudit} frozenCols={1} />}
+              {tab === 'names'     && (
+                auditData.nameAudit.length <= 1
+                  ? <div className="audit-no-orphans">All rule names are unique — no conflicts or duplicates detected.</div>
+                  : <SheetTab rows={auditData.nameAudit} frozenCols={1} />
+              )}
             </div>
           </>
         )}
 
-        {status !== 'loading' && (
+        {(status === 'done' || status === 'error') && (
           <div className="modal-footer">
             <button className="btn-ghost" onClick={onClose}>Close</button>
           </div>
@@ -158,31 +169,55 @@ function StatCard({ label, value, warn }) {
 
 // ── Generic sheet tab (renders aoa rows as a scrollable table) ────────────────
 
-function SheetTab({ rows, frozenCols = 1 }) {
+function SheetTab({ rows, frozenCols = 1, searchable = false }) {
+  const [query, setQuery] = useState('')
   if (!rows || rows.length === 0) return <div className="panel-state">No data</div>
   const [headers, ...data] = rows
+  const q = query.toLowerCase()
+  const filtered = searchable && q
+    ? data.filter(row => row.some(cell => String(cell ?? '').toLowerCase().includes(q)))
+    : data
   return (
     <div className="audit-sheet-wrap">
-      <table className="audit-table audit-table-sheet">
-        <thead>
-          <tr>
-            {headers.map((h, i) => (
-              <th key={i} className={i < frozenCols ? 'col-sticky' : ''}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row, ri) => (
-            <tr key={ri}>
-              {headers.map((_, ci) => (
-                <td key={ci} className={ci < frozenCols ? 'col-sticky' : ''}>
-                  {row[ci] ?? ''}
-                </td>
+      {searchable && (
+        <div className="audit-search-bar">
+          <input
+            className="audit-search-input"
+            type="text"
+            placeholder="Filter…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {q && (
+            <span className="audit-search-count">{filtered.length} of {data.length}</span>
+          )}
+        </div>
+      )}
+      <div className="audit-sheet-scroll">
+        <table className="audit-table audit-table-sheet">
+          <thead>
+            <tr>
+              {headers.map((h, i) => (
+                <th key={i} className={i < frozenCols ? 'col-sticky' : ''}>{h}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map((row, ri) => (
+              <tr key={ri}>
+                {headers.map((_, ci) => (
+                  <td key={ci} className={ci < frozenCols ? 'col-sticky' : ''}>
+                    {row[ci] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {searchable && q && filtered.length === 0 && (
+          <div className="panel-state">No matches for "{query}"</div>
+        )}
+      </div>
     </div>
   )
 }
@@ -190,13 +225,31 @@ function SheetTab({ rows, frozenCols = 1 }) {
 // ── Orphaned DEs tab ──────────────────────────────────────────────────────────
 
 function DEsTab({ rows }) {
+  const [query, setQuery] = useState('')
   const [headers, ...data] = rows
-  const orphaned = data.filter(r => r[2] === 'ORPHANED')
-  const inUse    = data.filter(r => r[2] !== 'ORPHANED')
+  const q = query.toLowerCase()
+  const match = row => !q || row[0].toLowerCase().includes(q) || (row[1] || '').toLowerCase().includes(q)
+
+  const orphaned = data.filter(r => r[2] === 'ORPHANED' && match(r))
+  const inUse    = data.filter(r => r[2] !== 'ORPHANED' && match(r))
+  const total    = data.length
 
   return (
     <div className="audit-des">
-      {orphaned.length === 0 && (
+      <div className="audit-search-bar">
+        <input
+          className="audit-search-input"
+          type="text"
+          placeholder="Filter data elements…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
+        {q && (
+          <span className="audit-search-count">{orphaned.length + inUse.length} of {total}</span>
+        )}
+      </div>
+
+      {!q && orphaned.length === 0 && (
         <div className="audit-no-orphans">All data elements are referenced — none can be safely deleted.</div>
       )}
 
@@ -230,6 +283,10 @@ function DEsTab({ rows }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {q && orphaned.length === 0 && inUse.length === 0 && (
+        <div className="panel-state">No matches for "{query}"</div>
       )}
     </div>
   )
