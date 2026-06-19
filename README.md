@@ -12,7 +12,7 @@ Relay is a desktop application for managing Adobe Launch (Tags) containers. It l
 - **Compare** — Diff two properties side-by-side and selectively apply missing or changed assets
 - **Audit** — Generate a detailed Excel report for any property covering extensions, rules, data elements, orphaned assets, and naming analysis
 - **Export** — Save a full property snapshot (rules, data elements, extensions) to a portable JSON file
-- **Import** — Restore a snapshot into any property, including properties in a different organization; extension IDs are remapped automatically by package name
+- **Import** — Restore a snapshot into any property with per-item selection (rules, data elements, and extensions individually checkable). Pre-flight validation blocks the import if required extensions are missing from the destination. Extension settings can also be selectively imported — overwriting tracked variables, custom code, tracking server, report suites, and other configuration in the destination.
 - **Add to Library** — After any copy or import, add the affected assets to a new or existing development library ready to build and publish
 
 ---
@@ -73,11 +73,12 @@ You can also bulk-import multiple credential profiles from a JSON file:
 To move a container from one Adobe org to another:
 
 1. Select the source property and click **Export** — save the `.json` file
-2. Sign out and sign in with credentials for the target organization
+2. Click **Switch** to sign in with credentials for the target organization
 3. Select the destination property and click **Import**
-4. Choose **skip existing** or **overwrite existing** and confirm
+4. Choose which rules, data elements, and extension settings to import
+5. Choose **skip existing** or **overwrite existing** and confirm
 
-> The target property must have the same extensions installed before importing. Any missing extensions are flagged as warnings; all other assets still import successfully.
+> Pre-flight validation checks that all required extensions are installed in the destination before allowing the import to proceed. Install any flagged extensions in Adobe Tags first, or deselect the affected items.
 
 ---
 
