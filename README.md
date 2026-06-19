@@ -41,16 +41,20 @@ npm run build
 
 ## Configuration & Authentication
 
-Relay authenticates against the Adobe Reactor API using **OAuth Server-to-Server** credentials. These are org-level service credentials — not tied to an individual user — so they need to be created once per Adobe org you want to work with.
+Relay uses **OAuth Server-to-Server** credentials from the Adobe Developer Console. These are org-level service credentials — not tied to an individual user — and need to be set up once per Adobe org.
 
 ### 1. Create an Adobe Developer Console project
 
 1. Go to [Adobe Developer Console](https://developer.adobe.com/console/) and select your org from the top-right selector
 2. Create a new project (or use an existing one)
-3. Click **Add API** and select **Experience Platform Launch API**
-4. Choose **OAuth Server-to-Server** as the authentication type
-5. Select a product profile that has access to the Tags properties you need — typically an Admin or Developer profile in the Adobe Launch product
-6. Save the project
+3. Add the required APIs for the features you need:
+
+| API | Required for |
+|---|---|
+| **Experience Platform Launch API** | All core features — Copy, Compare, Audit, Export, Import |
+| **Adobe Analytics API** | Web SDK Migration (reading variable names and report suite config) |
+
+4. For each API, choose **OAuth Server-to-Server** as the authentication type and select a product profile with access to the relevant properties (typically an Admin or Developer profile)
 
 ### 2. Find your credentials
 
@@ -62,9 +66,16 @@ Relay authenticates against the Adobe Reactor API using **OAuth Server-to-Server
 
 > **One set of credentials per org.** If you work across multiple Adobe organizations, create a Developer Console project in each org and add a separate credential profile in Relay for each.
 
-### 3. Add credentials to Relay
+### 3. Gemini API key (Web SDK Migration only)
 
-On first launch, click the **+** button on the sign-in screen and enter your credentials. You can also bulk-import multiple profiles from a JSON file:
+The Web SDK Migration wizard uses Google Gemini to suggest rule and variable mappings. To enable it:
+
+1. Obtain an API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. Enter the key in Relay's settings when prompted during the migration wizard
+
+### 4. Add credentials to Relay
+
+On first launch, click the **+** button on the sign-in screen and enter your Adobe credentials. You can also bulk-import multiple profiles from a JSON file:
 
 ```json
 [
