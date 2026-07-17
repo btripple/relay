@@ -6,7 +6,8 @@ export default function CopyPanel({
   destProperty, onDestSelect,
   selectedRuleCount, selectedDECount,
   onCopy, onCompare, comparing,
-  favorites, onToggleFavorite
+  favorites, onToggleFavorite,
+  onSetRuleNames
 }) {
   const [mode, setMode] = useState('skip')
   const [copying, setCopying] = useState(false)
@@ -91,6 +92,15 @@ export default function CopyPanel({
           onClick={onCompare}
         >
           {comparing ? 'Comparing…' : 'Compare properties'}
+        </button>
+
+        <button
+          className="btn-secondary"
+          disabled={!sourcePropertyId}
+          onClick={onSetRuleNames}
+          title="Inject rule name into link-tracking rules"
+        >
+          Set Rule Names…
         </button>
 
         {confirming ? (

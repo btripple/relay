@@ -979,6 +979,22 @@ details.form-advanced[open] .form-advanced-summary::before { transform: rotate(9
 .btn-compare:hover:not(:disabled) { background: #e8f2ff; }
 .btn-compare:disabled { opacity: .45; cursor: default; }
 
+/* ── Secondary button ─────────────────────────────── */
+.btn-secondary {
+  padding: 9px 16px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background .15s, border-color .15s;
+}
+.btn-secondary:hover:not(:disabled) { background: var(--bg); border-color: #bcc4d0; }
+.btn-secondary:disabled { opacity: .45; cursor: default; }
+
 /* ── Compare modal ────────────────────────────────── */
 .modal-compare {
   width: 680px;

@@ -10,6 +10,7 @@ import CompareModal from './components/CompareModal'
 import AuditModal from './components/AuditModal'
 import LibraryModal from './components/LibraryModal'
 import ImportModal from './components/ImportModal'
+import SetRuleNameModal from './features/setRuleName/SetRuleNameModal'
 import { buildAuditData } from './utils/auditExport'
 import { WEB_SDK_MIGRATION_ENABLED, MigrationWizard } from './features/webSdkMigration'
 
@@ -39,6 +40,7 @@ export default function App() {
   const [libraryState, setLibraryState] = useState(null)
   const [exportState, setExportState] = useState(null)
   const [importPreview, setImportPreview] = useState(null)
+  const [ruleNameState, setRuleNameState] = useState(null)
 
   // Load saved settings on mount, migrating legacy flat credentials to profiles
   useEffect(() => {
@@ -467,6 +469,7 @@ export default function App() {
               comparing={compareState?.status === 'loading'}
               favorites={favorites}
               onToggleFavorite={handleToggleFavorite}
+              onSetRuleNames={() => setRuleNameState({ step: 'modal' })}
             />
           ) : (
             <div className="panel-empty">
@@ -603,6 +606,28 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {ruleNameState?.step === 'modal' && (
+        <SetRuleNameModal
+          client={client}
+          rules={rules}
+          sourcePropertyId={sourceProperty?.id}
+          onLibrary={(ruleIds, propId) =>
+            setRuleNameState({ step: 'library', ruleIds, propertyId: propId })
+          }
+          onClose={() => setRuleNameState(null)}
+        />
+      )}
+
+      {ruleNameState?.step === 'library' && (
+        <LibraryModal
+          client={client}
+          destPropertyId={ruleNameState.propertyId}
+          ruleIds={ruleNameState.ruleIds}
+          deIds={[]}
+          onClose={() => setRuleNameState(null)}
+        />
       )}
 
       {showTransferMenu && transferMenuPos && createPortal(

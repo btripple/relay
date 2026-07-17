@@ -1,5 +1,5 @@
 const BASE = 'https://reactor.adobe.io'
-const RULE_FETCH_TIMEOUT_MS = 45_000  // per-rule component fetch; raise if your property is huge
+const RULE_FETCH_TIMEOUT_MS = 15_000  // per-rule component fetch; raise if your property is huge
 
 function withTimeout(promise, ms) {
   let timer
@@ -192,6 +192,17 @@ export default class ReactorClient {
   }
 
   deleteRuleComponent(id) { return this._request('DELETE', `/rule_components/${id}`) }
+
+  async updateRuleComponent(componentId, attrs) {
+    const r = await this._request('PATCH', `/rule_components/${componentId}`, {
+      data: {
+        type: 'rule_components',
+        id: componentId,
+        attributes: attrs
+      }
+    })
+    return r.data
+  }
 
   async createDataElement(propertyId, de, extMap) {
     const attrs = {}
