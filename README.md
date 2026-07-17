@@ -13,6 +13,7 @@ Relay is a desktop application for managing Adobe Launch (Tags) containers. It l
 - **Audit** — Generate a detailed Excel report for any property covering extensions, rules, data elements, orphaned assets, and naming analysis
 - **Export** — Save a full property snapshot (rules, data elements, extensions) to a portable JSON file
 - **Import** — Restore a snapshot into any property with per-item selection (rules, data elements, and extensions individually checkable). Pre-flight validation blocks the import if required extensions are missing from the destination. Extension settings can also be selectively imported — overwriting tracked variables, custom code, tracking server, report suites, and other configuration in the destination.
+- **Set Rule Names** — Automatically populate eVars or props with Adobe Analytics rule names for improved tracking and debugging (e.g., `s.eVar1 = event.$rule.name;`)
 - **Add to Library** — After any copy or import, add the affected assets to a new or existing development library ready to build and publish
 
 ---
@@ -103,6 +104,52 @@ To move a container from one Adobe org to another:
 5. Choose **skip existing** or **overwrite existing** and confirm
 
 > Pre-flight validation checks that all required extensions are installed in the destination before allowing the import to proceed. Install any flagged extensions in Adobe Tags first, or deselect the affected items.
+
+---
+
+## Set Rule Names
+
+Automatically populate an eVar or prop with the name of each rule as it executes. This is useful for debugging, reporting, and understanding which rules fired in your analytics implementation.
+
+### How to Use
+
+1. **Open a property** — Select the source property containing the rules you want to update
+2. **Click "Set Rule Names"** — Opens the Set Rule Names modal (only available for properties with link-tracking rules)
+3. **Step 1: Select a variable**
+   - Choose a target eVar (1–250) or prop (1–75) where rule names will be stored
+   - This will receive the code: `s.{variable} = event.$rule.name;`
+4. **Step 2: Review and confirm**
+   - Review the list of link-tracking rules that will be updated
+   - Uncheck any rules you don't want to modify
+   - Click **"Inject & Stage"** to inject the rule name code
+5. **Results**
+   - View which rules were successfully updated
+   - Rules with code already injected are skipped
+   - Click **"Stage to Library"** to add the updated rules to a development library for publishing
+
+### What Gets Updated
+
+- **Link-tracking rules only** — Rules that use the Send Beacon action with `s.tl()` calls
+- **Set Variables action** — The rule's Adobe Analytics "Set Variables" action is modified
+  - If missing, a new Set Variables action is automatically created
+  - The rule name assignment code is injected into the `customSetup.source` field
+- **Execution order** — Code runs before the Send Beacon action, so the rule name is captured
+
+### Example
+
+Before:
+```javascript
+// Custom Setup in Set Variables action (empty)
+// (no custom code)
+```
+
+After:
+```javascript
+// Custom Setup in Set Variables action
+s.eVar1 = event.$rule.name;
+```
+
+When the rule executes, `event.$rule.name` will contain the rule's display name, allowing you to see in Adobe Analytics which rules are firing.
 
 ---
 
